@@ -41,9 +41,9 @@ string getPageContent(string addr, string host, string path)
 
 		HTTPClientSession session(addr, 80);
 
-#ifdef _DEBUG
-		session.setProxy("127.0.0.1",8888);
-#endif
+//#ifdef _DEBUG
+//		session.setProxy("127.0.0.1",8888);
+//#endif
 		HTTPRequest req(HTTPRequest::HTTP_GET, path);
 		req.setHost(host);
 		//req.add("User-Agent", "Mozilla/5.0 (Windows NT 5.1; rv:2.0) Gecko/20100101 Firefox/4.0");
@@ -63,6 +63,11 @@ string getPageContent(string addr, string host, string path)
 	return content;
 }
 
+bool checkPageContent(string content)
+{
+	return (content.find("page?pn=0") != string::npos);
+}
+
 
 int _tmain(int argc, _TCHAR* argv[])
 {
@@ -78,8 +83,14 @@ int _tmain(int argc, _TCHAR* argv[])
 	//string cont = getPageContent("203.208.46.29", "mitbbsfetch.appspot.com", "/");
 	string cont = getPageContent(ip, "mitbbsfetch.appspot.com", "/");
 
-	std::cout << cont << std::endl;
+	//std::cout << cont << std::endl;
 
-	return 0;
+    if (checkPageContent(cont)) {
+        std::cout << "It works!" << std::endl;
+        return 0;
+    }
+    else {
+        std::cout << "Opps.." << std::endl;
+        return 2;
+    }
 }
-
