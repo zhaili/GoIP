@@ -62,11 +62,12 @@ string getPageContent(IPAddress addr, string host, string path)
 		sock.sendBytes(s.c_str(), s.length());
 
 		char response[1024];
-		int n;
+		int n, sn=0;
 		do {
             n = sock.receiveBytes(response, 1024);
             content.append(response, n);
-		} while (n!=0 && n<5000);
+			sn += n;
+		} while (n!=0 && sn<5000);
 
 		sock.close();
 	}
@@ -88,7 +89,6 @@ class Robot : public Poco::Runnable
 public:
     Robot(const IPAddress& ipaddr);
 	void run();
-protected:
 private:
 	IPAddress _ipaddr;
 	static FastMutex _mutex;
@@ -119,6 +119,8 @@ void Robot::run()
 	}
 
 	g_semaphore.set();
+
+	delete this;
 }
 
 /// class Search Task
@@ -126,11 +128,6 @@ void Robot::run()
 class TaskManager
 {
 public:
-	struct Task {
-		Robot *robot;
-		//Poco::Thread* thread;
-	};
-
 	TaskManager():_pool() {}
     ~TaskManager();
 
@@ -141,8 +138,6 @@ private:
     TaskManager& operator= (const TaskManager&);
 
 	Poco::ThreadPool _pool;
-	std::list<Task> _taskList;
-private:
 };
 
 
@@ -158,22 +153,11 @@ void TaskManager::addTask(IPAddress ip)
 	Robot* robot = new Robot(ip);
 
 	_pool.start(*robot);
-
-	Task task = {robot};
-	_taskList.push_back(task);
 }
 
 void TaskManager::waitAll()
 {
 	_pool.joinAll();
-
-	std::list<Task>::iterator iter;
-
-	for (iter=_taskList.begin();iter!=_taskList.end();++iter)
-	{
-		delete iter->robot;
-	}
-	_taskList.clear();
 }
 
 
@@ -193,15 +177,17 @@ int _tmain(int argc, _TCHAR* argv[])
 
 	u_long ip = htonl(inet_addr(ipstr.c_str()));
 
-	for (int i=0; i<range; ++i) {
+	for (int i=0; i<range; ++i, ++ip) {
 		in_addr inaddr;
 		inaddr.S_un.S_addr = ntohl(ip);
+
+		if (inaddr.S_un.S_un_b.s_b4 == 0 ||
+			inaddr.S_un.S_un_b.s_b4 == 255)
+			continue;
 
 		IPAddress ipaddr(&inaddr, sizeof(in_addr));
 
 		taskmgr.addTask(ipaddr);
-
-		++ip;
 	}
 
 	taskmgr.waitAll();
