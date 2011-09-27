@@ -4,6 +4,7 @@
 #include "stdafx.h"
 
 #include <iostream>
+#include <sstream>
 #include <list>
 
 #include "Poco/Net/HTTPClientSession.h"
@@ -18,6 +19,7 @@
 #include "Poco/Semaphore.h"
 #include "Poco/Exception.h"
 #include "Poco/UnicodeConverter.h"
+#include "Poco/Timespan.h"
 
 using std::string;
 
@@ -36,31 +38,39 @@ using Poco::ThreadPool;
 using Poco::Semaphore;
 using Poco::FastMutex;
 
-Semaphore g_semaphore(5,5);
+#define MAX_THREADS 5
+
+Semaphore g_semaphore(MAX_THREADS,MAX_THREADS);
 
 string getPageContent(IPAddress addr, string host, string path)
 {
 	std::string content;
 	try
 	{
-		HTTPClientSession session(SocketAddress(addr, 80));
+		Poco::Net::StreamSocket sock;
+		sock.connect(SocketAddress(addr, 80), Poco::Timespan(3,0));
+		sock.setSendTimeout(Poco::Timespan(3,0));
+		sock.setReceiveTimeout(Poco::Timespan(3,0));
 
-//#ifdef _DEBUG
-//		session.setProxy("127.0.0.1",8888);
-//#endif
 		HTTPRequest req(HTTPRequest::HTTP_GET, path);
 		req.setHost(host);
 
-		session.sendRequest(req);
+		std::ostringstream oss;
+		req.write(oss);
 
-		HTTPResponse res;
-		std::istream& rs = session.receiveResponse(res);
+		string s = oss.str();
+		sock.sendBytes(s.c_str(), s.length());
 
-		StreamCopier::copyToString(rs, content);
+		char response[1024];
+		int n;
+		do {
+            n = sock.receiveBytes(response, 1024);
+            content.append(response, n);
+		} while (n!=0 && n<5000);
 	}
 	catch (Poco::Exception& /*exc*/)
 	{
-		//ATLTRACE("%s\n",exc.displayText().c_str());
+		//std::cout << exc.displayText() << std::endl;
 	}
 
 	return content;
