@@ -4,6 +4,7 @@
 #include "stdafx.h"
 
 #include <iostream>
+#include <list>
 
 #include "Poco/Net/HTTPClientSession.h"
 #include "Poco/Net/HTTPRequest.h"
@@ -13,6 +14,8 @@
 #include "Poco/Path.h"
 #include "Poco/URI.h"
 #include "Poco/Thread.h"
+#include "Poco/ThreadPool.h"
+#include "Poco/Semaphore.h"
 #include "Poco/Exception.h"
 #include "Poco/UnicodeConverter.h"
 
@@ -23,30 +26,30 @@ using Poco::Net::HTTPRequest;
 using Poco::Net::HTTPResponse;
 using Poco::Net::HTTPMessage;
 using Poco::Net::SocketAddress;
+using Poco::Net::IPAddress;
 using Poco::Net::StreamSocket;
 using Poco::StreamCopier;
 using Poco::Path;
 using Poco::URI;
+using Poco::Thread;
+using Poco::ThreadPool;
+using Poco::Semaphore;
 using Poco::FastMutex;
 
-string getPageContent(string addr, string host, string path)
+Semaphore g_semaphore(5,5);
+
+string getPageContent(IPAddress addr, string host, string path)
 {
 	std::string content;
 	try
 	{
-		//URI uri(addr);
-
-		//std::string path(uri.getPathAndQuery());
-		//if (path.empty()) path = "/";
-
-		HTTPClientSession session(addr, 80);
+		HTTPClientSession session(SocketAddress(addr, 80));
 
 //#ifdef _DEBUG
 //		session.setProxy("127.0.0.1",8888);
 //#endif
 		HTTPRequest req(HTTPRequest::HTTP_GET, path);
 		req.setHost(host);
-		//req.add("User-Agent", "Mozilla/5.0 (Windows NT 5.1; rv:2.0) Gecko/20100101 Firefox/4.0");
 
 		session.sendRequest(req);
 
@@ -55,7 +58,7 @@ string getPageContent(string addr, string host, string path)
 
 		StreamCopier::copyToString(rs, content);
 	}
-	catch (Poco::Exception& exc)
+	catch (Poco::Exception& /*exc*/)
 	{
 		//ATLTRACE("%s\n",exc.displayText().c_str());
 	}
@@ -68,29 +71,128 @@ bool checkPageContent(string content)
 	return (content.find("page?pn=0") != string::npos);
 }
 
+class Robot : public Poco::Runnable
+{
+public:
+    Robot(const IPAddress& ipaddr);
+	void run();
+protected:
+private:
+	IPAddress _ipaddr;
+	static FastMutex _mutex;
+};
+
+FastMutex Robot::_mutex;
+
+Robot::Robot(const IPAddress& ipaddr)
+    :_ipaddr(ipaddr)
+{
+}
+
+void Robot::run()
+{
+	string cont = getPageContent(_ipaddr, "mitbbsfetch.appspot.com", "/");
+
+	bool iswork = checkPageContent(cont);
+
+	{
+		Poco::FastMutex::ScopedLock lock(_mutex);
+
+		if (iswork) {
+			std::cout << _ipaddr.toString() << " works!" << std::endl;
+		}
+		else {
+			std::cout << _ipaddr.toString() << " opps.." << std::endl;
+		}
+	}
+
+	g_semaphore.set();
+}
+
+/// class Search Task
+
+class TaskManager
+{
+public:
+	struct Task {
+		Robot *robot;
+		//Poco::Thread* thread;
+	};
+
+	TaskManager():_pool() {}
+    ~TaskManager();
+
+	void addTask(IPAddress ip);
+	void waitAll();
+private:
+	TaskManager(const TaskManager&);
+    TaskManager& operator= (const TaskManager&);
+
+	Poco::ThreadPool _pool;
+	std::list<Task> _taskList;
+private:
+};
+
+
+TaskManager::~TaskManager()
+{
+	waitAll();
+}
+
+void TaskManager::addTask(IPAddress ip)
+{
+	g_semaphore.wait();
+
+	Robot* robot = new Robot(ip);
+
+	_pool.start(*robot);
+
+	Task task = {robot};
+	_taskList.push_back(task);
+}
+
+void TaskManager::waitAll()
+{
+	_pool.joinAll();
+
+	std::list<Task>::iterator iter;
+
+	for (iter=_taskList.begin();iter!=_taskList.end();++iter)
+	{
+		delete iter->robot;
+	}
+	_taskList.clear();
+}
+
 
 int _tmain(int argc, _TCHAR* argv[])
 {
-	if (argc == 1) {
-		std::cout << "Usage: GoIP ip" << std::endl;
+	if (argc < 3) {
+		std::cout << "Usage: GoIP ip range" << std::endl;
 		return 1;
 	}
 
-	string ip;
-	Poco::UnicodeConverter::toUTF8(argv[1], ip);
+	string ipstr;
+	Poco::UnicodeConverter::toUTF8(argv[1], ipstr);
 
-	//string cont = getPageContent("78.140.176.182", "mitbbsfetch.appspot.com", "/");
-	//string cont = getPageContent("203.208.46.29", "mitbbsfetch.appspot.com", "/");
-	string cont = getPageContent(ip, "mitbbsfetch.appspot.com", "/");
+	int range = _ttoi(argv[2]);
 
-	//std::cout << cont << std::endl;
+	TaskManager taskmgr;
 
-    if (checkPageContent(cont)) {
-        std::cout << "It works!" << std::endl;
-        return 0;
-    }
-    else {
-        std::cout << "Opps.." << std::endl;
-        return 2;
-    }
+	u_long ip = htonl(inet_addr(ipstr.c_str()));
+
+	for (int i=0; i<range; ++i) {
+		in_addr inaddr;
+		inaddr.S_un.S_addr = ntohl(ip);
+
+		IPAddress ipaddr(&inaddr, sizeof(in_addr));
+
+		taskmgr.addTask(ipaddr);
+
+		++ip;
+	}
+
+	taskmgr.waitAll();
+
+	return 0;
 }
