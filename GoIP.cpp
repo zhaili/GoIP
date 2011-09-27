@@ -67,6 +67,8 @@ string getPageContent(IPAddress addr, string host, string path)
             n = sock.receiveBytes(response, 1024);
             content.append(response, n);
 		} while (n!=0 && n<5000);
+
+		sock.close();
 	}
 	catch (Poco::Exception& /*exc*/)
 	{
