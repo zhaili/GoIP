@@ -48,9 +48,9 @@ string getPageContent(IPAddress addr, string host, string path)
 	try
 	{
 		Poco::Net::StreamSocket sock;
-		sock.connect(SocketAddress(addr, 80), Poco::Timespan(3,0));
-		sock.setSendTimeout(Poco::Timespan(3,0));
-		sock.setReceiveTimeout(Poco::Timespan(3,0));
+		sock.connect(SocketAddress(addr, 80), Poco::Timespan(5,0));
+		sock.setSendTimeout(Poco::Timespan(5,0));
+		sock.setReceiveTimeout(Poco::Timespan(5,0));
 
 		HTTPRequest req(HTTPRequest::HTTP_GET, path);
 		req.setHost(host);
